@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import uuid
+from contextlib import asynccontextmanager
 from typing import Any, Awaitable, Callable, Literal
 
+import httpx
 import websockets
 from websockets.exceptions import ConnectionClosed
 
@@ -36,6 +39,7 @@ class AgentClient:
         metadata: dict[str, Any] | None = None,
         tools: list[ToolSchema] | None = None,
         tool_handler: Callable[[str, dict[str, Any]], Awaitable[Any]] | None = None,
+        invocation_url: str | None = None,
     ):
         self.master_url = master_url
         self.agent_id = agent_id
@@ -43,6 +47,7 @@ class AgentClient:
         self.metadata = metadata or {}
         self.tools = tools or []
         self.tool_handler = tool_handler
+        self.invocation_url = invocation_url
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._registered = asyncio.Event()
         self._registration_error: str | None = None
@@ -68,6 +73,8 @@ class AgentClient:
         }
         if self.tools:
             msg["tools"] = [t.model_dump() for t in self.tools]
+        if self.invocation_url:
+            msg["invocation_url"] = self.invocation_url
         await self._ws.send(json.dumps(msg))
         await asyncio.wait_for(self._registered.wait(), timeout=10.0)
         if self._registration_error:
@@ -160,4 +167,85 @@ class AgentClient:
             await self.close()
 
 
-# Type alias for agent_type literal
+def _resolve_master_url(master_url: str | None) -> str:
+    return master_url or os.environ.get("MASTER_WS", "ws://127.0.0.1:8000/ws")
+
+
+def _resolve_master_base_url(master_base_url: str | None) -> str:
+    return (master_base_url or os.environ.get("MASTER_BASE_URL", "http://127.0.0.1:8000")).rstrip("/")
+
+
+async def register_invocation_agent(
+    agent_id: str,
+    tools: list[ToolSchema],
+    invocation_base_url: str,
+    *,
+    master_base_url: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Register an action agent via HTTP (Redis only). Per-tool endpoint in each ToolSchema.endpoint. No WebSocket."""
+    url = f"{_resolve_master_base_url(master_base_url)}/register"
+    payload = {
+        "agent_id": agent_id,
+        "agent_type": "action",
+        "tools": [t.model_dump(exclude_none=True) for t in tools],
+        "invocation_base_url": invocation_base_url.rstrip("/"),
+        "metadata": metadata or {},
+    }
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(url, json=payload)
+    resp.raise_for_status()
+    data = resp.json()
+    if not data.get("ok"):
+        raise RuntimeError(data.get("error", "Registration failed"))
+
+
+async def run_action_agent(
+    agent_id: str,
+    tools: list[ToolSchema],
+    tool_handler: Callable[[str, dict[str, Any]], Awaitable[Any]],
+    *,
+    master_url: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    invocation_url: str | None = None,
+) -> None:
+    """Connect to master and run action agent forever. Uses MASTER_WS env if master_url omitted."""
+    url = _resolve_master_url(master_url)
+    client = AgentClient(
+        master_url=url,
+        agent_id=agent_id,
+        agent_type="action",
+        tools=tools,
+        tool_handler=tool_handler,
+        metadata=metadata,
+        invocation_url=invocation_url,
+    )
+    await client.run_action_agent()
+
+
+@asynccontextmanager
+async def connect_master(
+    agent_id: str,
+    *,
+    master_url: str | None = None,
+    metadata: dict[str, Any] | None = None,
+):
+    """Async context manager: connect to master as query agent, yield client, clean up on exit."""
+    url = _resolve_master_url(master_url)
+    client = AgentClient(
+        master_url=url,
+        agent_id=agent_id,
+        agent_type="query",
+        metadata=metadata,
+    )
+    await client.connect()
+    try:
+        yield client
+    finally:
+        if client._recv_task and not client._recv_task.done():
+            client._recv_task.cancel()
+            try:
+                await client._recv_task
+            except asyncio.CancelledError:
+                pass
+        await client.close()

@@ -18,6 +18,7 @@ class ToolSchema(BaseModel):
     name: str
     description: str
     parameters: dict[str, Any] = Field(default_factory=dict)  # JSON Schema object
+    endpoint: str | None = None  # path for this tool, e.g. "/run" or "/get_time"; default "/run"
 
 
 # --- Agent -> Master ---
@@ -30,6 +31,7 @@ class Register(BaseModel):
     agent_id: str
     metadata: dict[str, Any] | None = None
     tools: list[ToolSchema] | None = None  # required for action
+    invocation_url: str | None = None  # optional; when set, master invokes via HTTP
     ts: str | None = None
 
 

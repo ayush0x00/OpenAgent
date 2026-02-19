@@ -1,16 +1,20 @@
-"""Redis cache for agent registrations: invocation_base_url, per-tool endpoint, metadata."""
+"""Redis cache for agent registrations: invocation_base_url, per-tool endpoint, metadata. Keys have TTL; refresh on use."""
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
 from protocol import ToolSchema
 
-REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
+# REDIS_URL is in config; cache is used by master which imports config
 AGENTS_ACTION_KEY = "agents:action"
 AGENT_KEY_PREFIX = "agent:"
 DEFAULT_TOOL_ENDPOINT = "/run"
+
+
+def _agent_ttl_seconds() -> int:
+    import config
+    return getattr(config, "REDIS_AGENT_TTL_SECONDS", 86400)
 
 
 def _agent_key(agent_id: str) -> str:
@@ -62,12 +66,19 @@ async def save_agent(
         "invocation_base_url": base or "",
     }
     key = _agent_key(agent_id)
-    await redis_client.set(key, json.dumps(payload))
+    ttl = _agent_ttl_seconds()
+    await redis_client.setex(key, ttl, json.dumps(payload))
     await redis_client.sadd(AGENTS_ACTION_KEY, agent_id)
 
 
+async def refresh_agent_ttl(redis_client: Any, agent_id: str) -> None:
+    """Refresh TTL on agent key (call after successful health check or tool invocation)."""
+    key = _agent_key(agent_id)
+    await redis_client.expire(key, _agent_ttl_seconds())
+
+
 async def get_agent(redis_client: Any, agent_id: str) -> dict[str, Any] | None:
-    """Load action agent from Redis. Returns None if not found."""
+    """Load action agent from Redis. Returns None if not found (or expired)."""
     key = _agent_key(agent_id)
     raw = await redis_client.get(key)
     if raw is None:
@@ -75,28 +86,37 @@ async def get_agent(redis_client: Any, agent_id: str) -> dict[str, Any] | None:
     return json.loads(raw)
 
 
+def _decode_id(aid: Any) -> str:
+    return aid.decode() if isinstance(aid, bytes) else aid
+
+
 async def get_all_cached_agents(redis_client: Any) -> list[dict[str, Any]]:
-    """All agents in Redis (full docs: agent_id, metadata, tools with endpoint, invocation_base_url). For GET /agents merge."""
+    """All agents in Redis (full docs). Expired keys are skipped and removed from the set."""
     agent_ids = await redis_client.smembers(AGENTS_ACTION_KEY)
     if not agent_ids:
         return []
     out = []
     for aid in agent_ids:
-        a = await get_agent(redis_client, aid.decode() if isinstance(aid, bytes) else aid)
+        agent_id = _decode_id(aid)
+        a = await get_agent(redis_client, agent_id)
         if a is not None:
             out.append(a)
+        else:
+            await redis_client.srem(AGENTS_ACTION_KEY, agent_id)
     return out
 
 
 async def get_all_action_agents_snapshot(redis_client: Any) -> list[dict[str, Any]]:
-    """Snapshot for orchestrator: list of {agent_id, metadata, tools} (no invocation_url)."""
+    """Snapshot for orchestrator: list of {agent_id, metadata, tools}. Expired keys are skipped and removed from the set."""
     agent_ids = await redis_client.smembers(AGENTS_ACTION_KEY)
     if not agent_ids:
         return []
     out = []
     for aid in agent_ids:
-        a = await get_agent(redis_client, aid.decode() if isinstance(aid, bytes) else aid)
+        agent_id = _decode_id(aid)
+        a = await get_agent(redis_client, agent_id)
         if a is None:
+            await redis_client.srem(AGENTS_ACTION_KEY, agent_id)
             continue
         tools_for_llm = [{"name": t["name"], "description": t["description"], "parameters": t.get("parameters", {})} for t in (a.get("tools") or [])]
         out.append({

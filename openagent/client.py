@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Awaitable, Callable, Literal
 
 import httpx
 import websockets
+
+import config
 from websockets.exceptions import ConnectionClosed
 
 from protocol import (
@@ -54,10 +55,11 @@ class AgentClient:
         self._pending_queries: dict[str, asyncio.Future[QueryResult | Error]] = {}
         self._recv_task: asyncio.Task[None] | None = None
 
-    async def connect(self, *, connect_timeout: float = 10.0) -> None:
+    async def connect(self, *, connect_timeout: float | None = None) -> None:
+        timeout = connect_timeout if connect_timeout is not None else config.WS_CONNECT_TIMEOUT
         self._ws = await asyncio.wait_for(
             websockets.connect(self.master_url, close_timeout=2),
-            timeout=connect_timeout,
+            timeout=timeout,
         )
         self._registered.clear()
         self._registration_error = None
@@ -76,10 +78,10 @@ class AgentClient:
         if self.invocation_url:
             msg["invocation_url"] = self.invocation_url
         await self._ws.send(json.dumps(msg))
-        await asyncio.wait_for(self._registered.wait(), timeout=10.0)
+        await asyncio.wait_for(self._registered.wait(), timeout=config.WS_REGISTRATION_TIMEOUT)
         if self._registration_error:
             raise RuntimeError(self._registration_error)
-        print("Registered with master.")
+        print(f"[{self.agent_type}] {self.agent_id} registered with master")
 
     async def close(self) -> None:
         if self._ws:
@@ -148,7 +150,7 @@ class AgentClient:
         self._pending_queries[qid] = fut
         try:
             await self._ws.send(message_to_json(Query(id=qid, query=query)))
-            return await asyncio.wait_for(fut, timeout=60.0)
+            return await asyncio.wait_for(fut, timeout=config.QUERY_RESPONSE_TIMEOUT)
         finally:
             self._pending_queries.pop(qid, None)
 
@@ -168,11 +170,11 @@ class AgentClient:
 
 
 def _resolve_master_url(master_url: str | None) -> str:
-    return master_url or os.environ.get("MASTER_WS", "ws://127.0.0.1:8000/ws")
+    return master_url or config.MASTER_WS
 
 
 def _resolve_master_base_url(master_base_url: str | None) -> str:
-    return (master_base_url or os.environ.get("MASTER_BASE_URL", "http://127.0.0.1:8000")).rstrip("/")
+    return (master_base_url or config.MASTER_BASE_URL).rstrip("/")
 
 
 async def register_invocation_agent(
@@ -192,7 +194,7 @@ async def register_invocation_agent(
         "invocation_base_url": invocation_base_url.rstrip("/"),
         "metadata": metadata or {},
     }
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=config.HTTP_REGISTER_TIMEOUT) as client:
         resp = await client.post(url, json=payload)
     resp.raise_for_status()
     data = resp.json()

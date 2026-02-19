@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Demo action agent: HTTP server only. Registers invocation URL with master once (Redis). No WebSocket."""
 import asyncio
-import os
 import sys
 import threading
 from datetime import datetime, timezone
@@ -12,15 +11,8 @@ import httpx
 import uvicorn
 from fastapi import FastAPI, Request
 
+import config
 from openagent import ToolSchema, register_invocation_agent
-
-# Invocation server config
-INVOCATION_PORT = int(os.environ.get("INVOCATION_PORT", "9000"))
-INVOCATION_HOST = os.environ.get("INVOCATION_HOST", "127.0.0.1")
-INVOCATION_BASE_URL = os.environ.get(
-    "INVOCATION_BASE_URL",
-    f"http://{INVOCATION_HOST}:{INVOCATION_PORT}",
-)
 
 TOOLS = [
     ToolSchema(
@@ -96,19 +88,19 @@ async def get_time(request: Request):
 
 
 def _run_server():
-    uvicorn.run(app, host=INVOCATION_HOST, port=INVOCATION_PORT, log_level="warning")
+    uvicorn.run(app, host=config.INVOCATION_HOST, port=config.INVOCATION_PORT, log_level="warning")
 
 
 async def main():
     server_thread = threading.Thread(target=_run_server, daemon=True)
     server_thread.start()
     await asyncio.sleep(0.5)  # let server bind
-    print(f"Invocation base: {INVOCATION_BASE_URL} (tools: /run, /get_time)")
+    print(f"Invocation base: {config.INVOCATION_BASE_URL} (tools: /run, /get_time)")
     print("Registering with master (HTTP, Redis)...")
     await register_invocation_agent(
         "demo-invocation-agent",
         TOOLS,
-        INVOCATION_BASE_URL,
+        config.INVOCATION_BASE_URL,
     )
     print("Registered. Server running; master will invoke via URL. Ctrl+C to stop.")
     await asyncio.Event().wait()  # run forever

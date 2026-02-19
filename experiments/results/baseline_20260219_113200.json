@@ -1,0 +1,340 @@
+{
+  "test_name": "baseline",
+  "timestamp": "2026-02-19T11:32:00.147969+00:00",
+  "metrics": {
+    "total": 33,
+    "ok": 33,
+    "errors": 0,
+    "success_rate": 1.0,
+    "error_rate": 0.0,
+    "elapsed_sec": 26.12,
+    "qps": 1.26,
+    "valid_result_rate": 1.0,
+    "error_breakdown": {},
+    "correctness_checks": 7,
+    "correctness_pass": 6,
+    "correctness_rate": 0.8571
+  },
+  "num_queries": 33,
+  "queries": [
+    "Add the numbers 17 and 25.",
+    "What's the current weather in London?",
+    "Reverse the string 'orchestration'.",
+    "Convert 'hello world' to uppercase.",
+    "What is the current time in UTC?",
+    "Multiply 6 by 7.",
+    "Get the GCD of 48 and 18.",
+    "What is 12 factorial?",
+    "Get a 3-day forecast for Paris.",
+    "Slugify the text 'Hello World Example'.",
+    "Extract all numbers from the string 'foo 12 bar 3.5 baz'.",
+    "Sort the list [3, 1, 4, 1, 5] in ascending order.",
+    "Compute SHA256 hash of 'hello'.",
+    "Generate a new UUID.",
+    "What is compound interest on $1000 at 5% for 10 years?",
+    "What is the mean of [10, 20, 30, 40, 50]?",
+    "Search for 'machine learning' and return 3 results.",
+    "I need the current time in UTC for a log.",
+    "Compute the sum of 17 and 25.",
+    "I'm planning a trip to Paris \u2014 what's the weather there?",
+    "Take the string 'orchestration' and reverse it.",
+    "Turn 'load test' into all caps.",
+    "What is 6 times 7?",
+    "What is the least common multiple of 4 and 6?",
+    "Evaluate the polynomial with coefficients [1, 0, 2] at x=3 (i.e. 1 + 0*x + 2*x^2).",
+    "Get humidity for Tokyo.",
+    "Convert 25 Celsius to Fahrenheit.",
+    "Filter the list [1, 5, 10, 15, 20] to keep values greater than 8.",
+    "Base64 encode the string 'hello'.",
+    "Parse the JSON string '{\"a\": 1}'.",
+    "What is the monthly payment for a $200000 loan at 4% for 30 years?",
+    "What is the median of [1, 3, 3, 6, 7, 8, 9]?",
+    "Run a search query for 'orchestration' with limit 5."
+  ],
+  "results": [
+    {
+      "status": "ok",
+      "value": {
+        "result": 42
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "city": "London",
+        "temperature": 22,
+        "unit": "C",
+        "conditions": "partly cloudy"
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "result": "noitartsehcro"
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "result": "HELLO WORLD"
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "iso": "2026-02-19T11:31:37.926985+00:00",
+        "timezone": "UTC"
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "result": 42
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "result": 6
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "result": 479001600
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "city": "Paris",
+        "days": [
+          {
+            "day": 1,
+            "high": 21,
+            "low": 11,
+            "conditions": "sunny"
+          },
+          {
+            "day": 2,
+            "high": 22,
+            "low": 12,
+            "conditions": "sunny"
+          },
+          {
+            "day": 3,
+            "high": 23,
+            "low": 13,
+            "conditions": "sunny"
+          }
+        ]
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "result": "hello-world-example"
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "numbers": [
+          12.0,
+          3.5
+        ]
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "result": [
+          1,
+          1,
+          3,
+          4,
+          5
+        ]
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "hash": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "uuid": "84c6cd87-437a-44c3-b507-8db562fd9d4c"
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "amount": 60466176000
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "mean": 30.0
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "results": [
+          {
+            "id": "doc_0",
+            "title": "Result 0 for machine learning",
+            "snippet": "Snippet 0..."
+          },
+          {
+            "id": "doc_1",
+            "title": "Result 1 for machine learning",
+            "snippet": "Snippet 1..."
+          },
+          {
+            "id": "doc_2",
+            "title": "Result 2 for machine learning",
+            "snippet": "Snippet 2..."
+          }
+        ]
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "iso": "2026-02-19T11:31:47.345138+00:00",
+        "timezone": "UTC"
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "result": 42
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "city": "Paris",
+        "temperature": 22,
+        "unit": "C",
+        "conditions": "partly cloudy"
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "result": "noitartsehcro"
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "result": "LOAD TEST"
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "result": 42
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "result": 12
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "result": 19
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "city": "Tokyo",
+        "humidity_percent": 65
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "f": 77.0
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "result": [
+          10,
+          15,
+          20
+        ]
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "result": "aGVsbG8="
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "result": {
+          "a": 1
+        }
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "payment": 66666.66666666666
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "median": 6.0
+      }
+    },
+    {
+      "status": "ok",
+      "value": {
+        "results": [
+          {
+            "id": "doc_0",
+            "title": "Result 0 for orchestration",
+            "snippet": "Snippet 0..."
+          },
+          {
+            "id": "doc_1",
+            "title": "Result 1 for orchestration",
+            "snippet": "Snippet 1..."
+          },
+          {
+            "id": "doc_2",
+            "title": "Result 2 for orchestration",
+            "snippet": "Snippet 2..."
+          },
+          {
+            "id": "doc_3",
+            "title": "Result 3 for orchestration",
+            "snippet": "Snippet 3..."
+          },
+          {
+            "id": "doc_4",
+            "title": "Result 4 for orchestration",
+            "snippet": "Snippet 4..."
+          }
+        ]
+      }
+    }
+  ]
+}

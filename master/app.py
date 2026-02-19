@@ -3,22 +3,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import uuid
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
 import httpx
-from dotenv import load_dotenv
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from openai import AsyncOpenAI
 from redis.asyncio import Redis
 
-# Load .env from project root
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
-
+import config
 from protocol import (
     Error,
     Ping,
@@ -33,7 +28,7 @@ from protocol import (
     parse_message,
     message_to_json,
 )
-from master.cache import get_agent, get_all_action_agents_snapshot, get_all_cached_agents, save_agent
+from master.cache import get_agent, get_all_action_agents_snapshot, get_all_cached_agents, refresh_agent_ttl, save_agent
 from master.registry import AgentRegistry
 from master.orchestrator import decide
 from master.tracker import AgentTracker
@@ -41,16 +36,33 @@ from master.tracker import AgentTracker
 # App state
 registry = AgentRegistry()
 tracker = AgentTracker()
-pending_tool_results: dict[str, tuple[asyncio.Future[ToolResult], Any, str]] = {}  # call_id -> (future, query_send, query_id)
+pending_tool_results: dict[str, tuple[asyncio.Future[ToolResult], Any, str, str | None]] = {}  # call_id -> (future, query_send, query_id, agent_id_for_ttl|None)
 
 GREEN = "\033[92m"
 RED = "\033[91m"
 RESET = "\033[0m"
 
-MASTER_BASE_URL = os.environ.get("MASTER_BASE_URL", "http://127.0.0.1:8000")
-
 # Set in lifespan for use in WS (no request.app in websocket handler)
 _redis: Redis | None = None
+
+# Retry when Redis lookup misses (e.g. registration race)
+_AGENT_LOOKUP_RETRIES = 3
+_AGENT_LOOKUP_DELAY = 0.4
+
+
+async def _get_agent_with_retry(redis: Redis | None, agent_id: str):
+    """Return cached agent from Redis; retry a few times with short delay to handle registration race."""
+    if not redis:
+        return None
+    for attempt in range(_AGENT_LOOKUP_RETRIES):
+        cached = await get_agent(redis, agent_id)
+        if cached and (cached.get("invocation_base_url") or cached.get("invocation_url")):
+            return cached
+        if cached:
+            return cached
+        if attempt < _AGENT_LOOKUP_RETRIES - 1:
+            await asyncio.sleep(_AGENT_LOOKUP_DELAY)
+    return None
 
 
 async def _fetch_cached_agents_with_health() -> list[dict[str, Any]]:
@@ -70,9 +82,11 @@ async def _fetch_cached_agents_with_health() -> list[dict[str, Any]]:
         }
         if base:
             try:
-                async with httpx.AsyncClient(timeout=2.0) as client:
+                async with httpx.AsyncClient(timeout=config.HEALTH_CHECK_TIMEOUT) as client:
                     r = await client.get(f"{base.rstrip('/')}/health")
                 entry["status"] = "UP" if r.status_code == 200 else "DOWN"
+                if entry["status"] == "UP" and _redis:
+                    await refresh_agent_ttl(_redis, a.get("agent_id", ""))
             except Exception:
                 entry["status"] = "DOWN"
         else:
@@ -82,15 +96,14 @@ async def _fetch_cached_agents_with_health() -> list[dict[str, Any]]:
 
 
 def get_openai_client() -> AsyncOpenAI:
-    key = os.environ.get("OPENAI_API_KEY")
-    if not key:
-        raise RuntimeError("OPENAI_API_KEY not set")
-    return AsyncOpenAI(api_key=key)
+    if not config.OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY not set (check .env or config)")
+    return AsyncOpenAI(api_key=config.OPENAI_API_KEY)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
+    redis_url = config.REDIS_URL
     redis_client: Redis | None = None
     try:
         redis_client = Redis.from_url(redis_url, decode_responses=False)
@@ -200,7 +213,7 @@ async def websocket_endpoint(ws: WebSocket):
                         if a["agent_id"] not in seen:
                             snapshot.append(a)
                             seen.add(a["agent_id"])
-                    decision = await decide(client, "gpt-4o-mini", parsed.query, snapshot)
+                    decision = await decide(client, config.ORCHESTRATOR_MODEL, parsed.query, snapshot)
                 except Exception as e:
                     await send_msg(QueryResult(id=parsed.id, error=str(e)))
                     continue
@@ -214,9 +227,7 @@ async def websocket_endpoint(ws: WebSocket):
                     call_id = str(uuid.uuid4())
                     loop = asyncio.get_event_loop()
                     fut = loop.create_future()
-                    pending_tool_results[call_id] = (fut, send_msg, parsed.id)
-
-                    cached = await get_agent(_redis, aid) if _redis else None
+                    cached = await _get_agent_with_retry(_redis, aid)
                     invocation_url = None
                     if cached:
                         base = cached.get("invocation_base_url")
@@ -230,13 +241,15 @@ async def websocket_endpoint(ws: WebSocket):
                         else:
                             invocation_url = cached.get("invocation_url")  # legacy
 
+                    pending_tool_results[call_id] = (fut, send_msg, parsed.id, aid if invocation_url else None)
+
                     if invocation_url:
                         # HTTP invoke: POST to per-tool URL; callback will complete the future
-                        callback_url = f"{MASTER_BASE_URL.rstrip('/')}/tool_callback"
+                        callback_url = f"{config.MASTER_BASE_URL}/tool_callback"
                         payload = {"call_id": call_id, "tool_name": tname, "arguments": args, "callback_url": callback_url}
                         print(f"[Orchestrator] calling {aid}.{tname}({args}) via HTTP @ {invocation_url}")
                         try:
-                            async with httpx.AsyncClient(timeout=2.0) as http:
+                            async with httpx.AsyncClient(timeout=config.TOOL_INVOKE_HTTP_TIMEOUT) as http:
                                 await http.post(invocation_url, json=payload)
                         except Exception as e:
                             pending_tool_results.pop(call_id, None)
@@ -253,7 +266,7 @@ async def websocket_endpoint(ws: WebSocket):
                         await action_agent.send(ToolCall(id=call_id, tool_name=tname, arguments=args))
 
                     try:
-                        tool_res: ToolResult = await asyncio.wait_for(fut, timeout=30.0)
+                        tool_res: ToolResult = await asyncio.wait_for(fut, timeout=config.TOOL_CALL_TIMEOUT)
                     except asyncio.TimeoutError:
                         pending_tool_results.pop(call_id, None)
                         print(f"[Orchestrator] {aid}.{tname} -> timeout")
@@ -271,7 +284,7 @@ async def websocket_endpoint(ws: WebSocket):
             if isinstance(parsed, ToolResult):
                 entry = pending_tool_results.get(parsed.call_id)
                 if entry:
-                    fut, _, _ = entry
+                    fut = entry[0]
                     if not fut.done():
                         fut.set_result(parsed)
                 continue
@@ -307,7 +320,7 @@ async def tool_callback(request: Request):
     entry = pending_tool_results.get(call_id)
     if not entry:
         return JSONResponse({"ok": False, "error": "Unknown or expired call_id"}, status_code=404)
-    fut, send_msg, query_id = entry
+    fut, send_msg, query_id, agent_id_ttl = entry
     if not fut.done():
         tool_res = ToolResult(
             id=str(uuid.uuid4()),
@@ -317,6 +330,8 @@ async def tool_callback(request: Request):
             error=error,
         )
         fut.set_result(tool_res)
+    if success and agent_id_ttl and _redis:
+        await refresh_agent_ttl(_redis, agent_id_ttl)
     return JSONResponse({"ok": True})
 
 
